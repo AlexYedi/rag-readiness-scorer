@@ -17,19 +17,86 @@ interface ScoreResult {
   summary: string;
 }
 
-const gradeColor: Record<string, string> = {
-  A: "text-green-600 bg-green-50 border-green-200",
-  B: "text-blue-600 bg-blue-50 border-blue-200",
-  C: "text-yellow-600 bg-yellow-50 border-yellow-200",
-  D: "text-orange-600 bg-orange-50 border-orange-200",
-  F: "text-red-600 bg-red-50 border-red-200",
+// Dark-theme grade colors — bg works on zinc-950, text pops
+const gradeConfig: Record<string, { text: string; bg: string; border: string; bar: string; ring: string }> = {
+  A: { text: "text-emerald-400", bg: "bg-emerald-950/50", border: "border-emerald-800", bar: "bg-emerald-500", ring: "stroke-emerald-500" },
+  B: { text: "text-blue-400", bg: "bg-blue-950/50", border: "border-blue-800", bar: "bg-blue-500", ring: "stroke-blue-500" },
+  C: { text: "text-amber-400", bg: "bg-amber-950/50", border: "border-amber-800", bar: "bg-amber-500", ring: "stroke-amber-500" },
+  D: { text: "text-orange-400", bg: "bg-orange-950/50", border: "border-orange-800", bar: "bg-orange-500", ring: "stroke-orange-500" },
+  F: { text: "text-red-400", bg: "bg-red-950/50", border: "border-red-800", bar: "bg-red-500", ring: "stroke-red-500" },
 };
+
+const fallbackGrade = { text: "text-zinc-400", bg: "bg-zinc-800", border: "border-zinc-700", bar: "bg-zinc-500", ring: "stroke-zinc-500" };
+
+function ScoreRing({ score, grade, size = 120 }: { score: number; grade: string; size?: number }) {
+  const config = gradeConfig[grade] || fallbackGrade;
+  const strokeWidth = 8;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          className="text-zinc-800"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className={`${config.ring} transition-all duration-1000 ease-out`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={`text-3xl font-bold ${config.text}`}>{grade}</span>
+        <span className="text-xs text-zinc-500">{score}/100</span>
+      </div>
+    </div>
+  );
+}
+
+function ScoreBar({ score, grade }: { score: number; grade: string }) {
+  const config = gradeConfig[grade] || fallbackGrade;
+  return (
+    <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div
+        className={`h-full rounded-full ${config.bar} transition-all duration-700 ease-out`}
+        style={{ width: `${score}%` }}
+      />
+    </div>
+  );
+}
+
+function DimensionIcon({ name }: { name: string }) {
+  // Simple icon mapping using unicode — keeps bundle tiny
+  const icons: Record<string, string> = {
+    "Metadata Quality": "\u{1F3F7}",
+    "Semantic Clarity": "\u{1F50D}",
+    "Structure for Chunking": "\u{1F9E9}",
+    "Completeness": "\u{1F4CB}",
+    "Currency & Temporality": "\u{231B}",
+  };
+  return <span className="text-lg">{icons[name] || "\u{1F4CA}"}</span>;
+}
 
 export default function Home() {
   const [document, setDocument] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showRemediation, setShowRemediation] = useState<Record<number, boolean>>({});
 
   const handleScore = async () => {
     if (!document.trim()) {
@@ -40,6 +107,7 @@ export default function Home() {
     setLoading(true);
     setError("");
     setResult(null);
+    setShowRemediation({});
 
     try {
       const response = await fetch("/api/score", {
@@ -63,17 +131,24 @@ export default function Home() {
     }
   };
 
+  const toggleRemediation = (index: number) => {
+    setShowRemediation((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="max-w-3xl mx-auto px-6 py-12">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">
-            RAG Readiness Scorer
-          </h1>
-          <p className="mt-2 text-zinc-400">
-            Paste a document. Get scored across 5 readiness dimensions for
-            retrieval-augmented generation.
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-emerald-500 rounded-lg" />
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+              RAG Readiness Scorer
+            </h1>
+          </div>
+          <p className="text-zinc-400 text-sm sm:text-base">
+            Paste a document. Get scored across 5 dimensions for
+            retrieval-augmented generation readiness.
           </p>
         </div>
 
@@ -82,8 +157,8 @@ export default function Home() {
           <textarea
             value={document}
             onChange={(e) => setDocument(e.target.value)}
-            placeholder="Paste your document here..."
-            className="w-full h-48 p-4 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-y font-mono text-sm"
+            placeholder="Paste your document here — event invites, meeting notes, research briefs, knowledge base articles..."
+            className="w-full h-48 p-4 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-600 resize-y font-mono text-sm leading-relaxed"
           />
           <div className="flex items-center justify-between mt-3">
             <span className="text-xs text-zinc-500">
@@ -92,78 +167,143 @@ export default function Home() {
             <button
               onClick={handleScore}
               disabled={loading || !document.trim()}
-              className="px-6 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="px-6 py-2.5 bg-white text-zinc-900 font-semibold rounded-lg hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
             >
-              {loading ? "Scoring..." : "Score Document"}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Scoring...
+                </span>
+              ) : (
+                "Score Document"
+              )}
             </button>
           </div>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-950 border border-red-800 rounded-lg text-red-300 text-sm">
+          <div className="mb-6 p-4 bg-red-950/50 border border-red-900 rounded-lg text-red-300 text-sm">
             {error}
           </div>
         )}
 
-        {/* Loading */}
+        {/* Loading skeleton */}
         {loading && (
-          <div className="mb-6 p-8 bg-zinc-900 border border-zinc-800 rounded-lg text-center">
-            <div className="animate-pulse text-zinc-400">
-              Analyzing document across 5 RAG readiness dimensions...
-            </div>
+          <div className="space-y-4 mb-6">
+            <div className="h-32 bg-zinc-900 border border-zinc-800 rounded-lg animate-pulse" />
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-24 bg-zinc-900 border border-zinc-800 rounded-lg animate-pulse" />
+            ))}
           </div>
         )}
 
         {/* Results */}
         {result && (
-          <div className="space-y-6">
-            {/* Overall Grade */}
-            <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-lg">
-              <div className="flex items-center gap-4">
-                <div className="flex flex-col items-center">
-                  <div
-                    className={`text-4xl font-bold px-4 py-2 rounded-lg border ${gradeColor[result.overallGrade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
-                  >
-                    {result.overallGrade}
-                  </div>
-                  <span className="text-xs text-zinc-500 mt-1">{result.overallScore}/100</span>
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold">
+          <div className="space-y-4 animate-in fade-in duration-500">
+            {/* Overall Score Card */}
+            <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl">
+              <div className="flex items-center gap-6">
+                <ScoreRing score={result.overallScore} grade={result.overallGrade} />
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-semibold mb-1">
                     Overall RAG Readiness
                   </h2>
-                  <p className="text-sm text-zinc-400 mt-1">
+                  <p className="text-sm text-zinc-400 leading-relaxed">
                     {result.summary}
                   </p>
                 </div>
               </div>
+
+              {/* Mini score strip */}
+              <div className="mt-5 pt-4 border-t border-zinc-800 grid grid-cols-5 gap-2">
+                {result.dimensions.map((dim, i) => {
+                  const config = gradeConfig[dim.grade] || fallbackGrade;
+                  return (
+                    <div key={i} className="text-center">
+                      <div className={`text-lg font-bold ${config.text}`}>{dim.grade}</div>
+                      <div className="text-[10px] text-zinc-500 leading-tight mt-0.5 truncate">
+                        {dim.name.replace("& Temporality", "& Time")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Dimension Cards */}
-            {result.dimensions.map((dim, i) => (
-              <div
-                key={i}
-                className="p-5 bg-zinc-900 border border-zinc-800 rounded-lg"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold">{dim.name}</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-zinc-500">{dim.score}/100</span>
-                    <span
-                      className={`text-xl font-bold px-3 py-1 rounded border ${gradeColor[dim.grade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
+            {result.dimensions.map((dim, i) => {
+              const config = gradeConfig[dim.grade] || fallbackGrade;
+              const isOpen = showRemediation[i];
+
+              return (
+                <div
+                  key={i}
+                  className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+                >
+                  {/* Score bar at top of card */}
+                  <ScoreBar score={dim.score} grade={dim.grade} />
+
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <DimensionIcon name={dim.name} />
+                        <h3 className="font-semibold">{dim.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-sm text-zinc-500 tabular-nums">{dim.score}/100</span>
+                        <span
+                          className={`text-xl font-bold px-3 py-0.5 rounded-lg border ${config.text} ${config.bg} ${config.border}`}
+                        >
+                          {dim.grade}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-zinc-300 leading-relaxed">{dim.explanation}</p>
+
+                    {/* Expandable remediation */}
+                    <button
+                      onClick={() => toggleRemediation(i)}
+                      className="mt-3 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
                     >
-                      {dim.grade}
-                    </span>
+                      <svg
+                        className={`w-3 h-3 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                      How to fix
+                    </button>
+                    {isOpen && (
+                      <div className="mt-2 p-3 bg-zinc-800/50 rounded-lg text-sm text-zinc-400 leading-relaxed animate-in fade-in slide-in-from-top-1 duration-200">
+                        {dim.remediation}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <p className="text-sm text-zinc-300 mb-3">{dim.explanation}</p>
-                <div className="text-sm text-zinc-500 border-t border-zinc-800 pt-3">
-                  <span className="font-medium text-zinc-400">Fix: </span>
-                  {dim.remediation}
-                </div>
-              </div>
-            ))}
+              );
+            })}
+
+            {/* Score again */}
+            <div className="pt-2 text-center">
+              <button
+                onClick={() => {
+                  setResult(null);
+                  setDocument("");
+                  setShowRemediation({});
+                }}
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Score another document
+              </button>
+            </div>
           </div>
         )}
       </div>
