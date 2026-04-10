@@ -4,6 +4,7 @@ import { useState } from "react";
 
 interface Dimension {
   name: string;
+  score: number;
   grade: string;
   explanation: string;
   remediation: string;
@@ -11,6 +12,7 @@ interface Dimension {
 
 interface ScoreResult {
   dimensions: Dimension[];
+  overallScore: number;
   overallGrade: string;
   summary: string;
 }
@@ -119,10 +121,13 @@ export default function Home() {
             {/* Overall Grade */}
             <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-lg">
               <div className="flex items-center gap-4">
-                <div
-                  className={`text-4xl font-bold px-4 py-2 rounded-lg border ${gradeColor[result.overallGrade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
-                >
-                  {result.overallGrade}
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`text-4xl font-bold px-4 py-2 rounded-lg border ${gradeColor[result.overallGrade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
+                  >
+                    {result.overallGrade}
+                  </div>
+                  <span className="text-xs text-zinc-500 mt-1">{result.overallScore}/100</span>
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold">
@@ -143,11 +148,14 @@ export default function Home() {
               >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold">{dim.name}</h3>
-                  <span
-                    className={`text-xl font-bold px-3 py-1 rounded border ${gradeColor[dim.grade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
-                  >
-                    {dim.grade}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-500">{dim.score}/100</span>
+                    <span
+                      className={`text-xl font-bold px-3 py-1 rounded border ${gradeColor[dim.grade] || "text-zinc-400 bg-zinc-800 border-zinc-700"}`}
+                    >
+                      {dim.grade}
+                    </span>
+                  </div>
                 </div>
                 <p className="text-sm text-zinc-300 mb-3">{dim.explanation}</p>
                 <div className="text-sm text-zinc-500 border-t border-zinc-800 pt-3">
