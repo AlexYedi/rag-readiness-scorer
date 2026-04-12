@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 
 interface Dimension {
   name: string;
@@ -27,6 +27,16 @@ const gradeConfig: Record<string, { text: string; bg: string; border: string; ba
 };
 
 const fallbackGrade = { text: "text-zinc-400", bg: "bg-zinc-800", border: "border-zinc-700", bar: "bg-zinc-500", ring: "stroke-zinc-500" };
+
+const ACCEPTED_TYPES = ".pdf,.docx,.txt,.md,.csv,.json";
+const ACCEPTED_MIME = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+];
 
 function ScoreRing({ score, grade, size = 120 }: { score: number; grade: string; size?: number }) {
   const config = gradeConfig[grade] || fallbackGrade;
@@ -80,7 +90,6 @@ function ScoreBar({ score, grade }: { score: number; grade: string }) {
 }
 
 function DimensionIcon({ name }: { name: string }) {
-  // Simple icon mapping using unicode — keeps bundle tiny
   const icons: Record<string, string> = {
     "Metadata Quality": "\u{1F3F7}",
     "Semantic Clarity": "\u{1F50D}",
@@ -91,16 +100,90 @@ function DimensionIcon({ name }: { name: string }) {
   return <span className="text-lg">{icons[name] || "\u{1F4CA}"}</span>;
 }
 
+type InputMode = "paste" | "upload";
+
 export default function Home() {
+  const [inputMode, setInputMode] = useState<InputMode>("paste");
   const [document, setDocument] = useState("");
+  const [fileName, setFileName] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState("");
   const [showRemediation, setShowRemediation] = useState<Record<number, boolean>>({});
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const extractTextFromFile = async (file: File): Promise<string> => {
+    setExtracting(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to extract text.");
+      }
+
+      if (data.truncated) {
+        setError(`File truncated from ${data.originalLength.toLocaleString()} to 50,000 characters.`);
+      }
+
+      return data.text;
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handleFileSelect = async (file: File) => {
+    if (!ACCEPTED_MIME.includes(file.type) && !file.name.match(/\.(pdf|docx|txt|md|csv|json)$/i)) {
+      setError("Unsupported file type. Use PDF, DOCX, TXT, MD, CSV, or JSON.");
+      return;
+    }
+
+    setFileName(file.name);
+    setError("");
+
+    try {
+      const text = await extractTextFromFile(file);
+      setDocument(text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to extract text from file.");
+      setFileName("");
+    }
+  };
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      setInputMode("upload");
+      await handleFileSelect(file);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  }, []);
 
   const handleScore = async () => {
     if (!document.trim()) {
-      setError("Paste a document to score.");
+      setError("Paste a document or upload a file to score.");
       return;
     }
 
@@ -131,12 +214,37 @@ export default function Home() {
     }
   };
 
+  const handleReset = () => {
+    setResult(null);
+    setDocument("");
+    setFileName("");
+    setShowRemediation({});
+    setError("");
+  };
+
   const toggleRemediation = (index: number) => {
     setShowRemediation((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
+  const hasInput = document.trim().length > 0;
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div
+      className="min-h-screen bg-zinc-950 text-zinc-100"
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+    >
+      {/* Full-page drag overlay */}
+      {dragActive && (
+        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="p-8 border-2 border-dashed border-blue-500 rounded-2xl bg-blue-950/30">
+            <p className="text-lg text-blue-400 font-medium">Drop file to score</p>
+            <p className="text-sm text-zinc-500 mt-1">PDF, DOCX, TXT, MD, CSV, JSON</p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         {/* Header */}
         <div className="mb-8">
@@ -147,26 +255,117 @@ export default function Home() {
             </h1>
           </div>
           <p className="text-zinc-400 text-sm sm:text-base">
-            Paste a document. Get scored across 5 dimensions for
+            Paste text or upload a file. Get scored across 5 dimensions for
             retrieval-augmented generation readiness.
           </p>
         </div>
 
-        {/* Input */}
+        {/* Input mode tabs */}
+        <div className="flex gap-1 mb-4 bg-zinc-900 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setInputMode("paste")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              inputMode === "paste"
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Paste text
+          </button>
+          <button
+            onClick={() => setInputMode("upload")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              inputMode === "upload"
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Upload file
+          </button>
+        </div>
+
+        {/* Input area */}
         <div className="mb-6">
-          <textarea
-            value={document}
-            onChange={(e) => setDocument(e.target.value)}
-            placeholder="Paste your document here — event invites, meeting notes, research briefs, knowledge base articles..."
-            className="w-full h-48 p-4 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-600 resize-y font-mono text-sm leading-relaxed"
-          />
+          {inputMode === "paste" ? (
+            <textarea
+              value={document}
+              onChange={(e) => { setDocument(e.target.value); setFileName(""); }}
+              placeholder="Paste your document here — event invites, meeting notes, research briefs, knowledge base articles..."
+              className="w-full h-48 p-4 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-600 resize-y font-mono text-sm leading-relaxed"
+            />
+          ) : (
+            <div className="space-y-3">
+              {/* Drop zone */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-48 p-4 bg-zinc-900 border-2 border-dashed border-zinc-700 rounded-lg flex flex-col items-center justify-center gap-3 hover:border-zinc-500 hover:bg-zinc-900/80 transition-colors cursor-pointer"
+              >
+                <svg className="w-10 h-10 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                {extracting ? (
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Extracting text...
+                  </div>
+                ) : fileName ? (
+                  <div className="text-center">
+                    <p className="text-sm text-zinc-300 font-medium">{fileName}</p>
+                    <p className="text-xs text-zinc-500 mt-1">{document.length.toLocaleString()} characters extracted. Click to replace.</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <p className="text-sm text-zinc-400">
+                      Click to select or drag and drop
+                    </p>
+                    <p className="text-xs text-zinc-600 mt-1">
+                      PDF, DOCX, TXT, MD, CSV, JSON — up to 10MB
+                    </p>
+                  </div>
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_TYPES}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileSelect(file);
+                  e.target.value = "";
+                }}
+                className="hidden"
+              />
+
+              {/* Show extracted text preview */}
+              {document && (
+                <div className="relative">
+                  <textarea
+                    value={document}
+                    onChange={(e) => setDocument(e.target.value)}
+                    className="w-full h-32 p-4 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-600 resize-y font-mono text-sm leading-relaxed"
+                  />
+                  <div className="absolute top-2 right-2">
+                    <span className="text-[10px] text-zinc-600 bg-zinc-800 px-2 py-0.5 rounded">
+                      Extracted text — editable
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between mt-3">
             <span className="text-xs text-zinc-500">
               {document.length.toLocaleString()} / 50,000 characters
+              {fileName && <span className="ml-2 text-zinc-600">from {fileName}</span>}
             </span>
             <button
               onClick={handleScore}
-              disabled={loading || !document.trim()}
+              disabled={loading || extracting || !hasInput}
               className="px-6 py-2.5 bg-white text-zinc-900 font-semibold rounded-lg hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
             >
               {loading ? (
@@ -204,6 +403,16 @@ export default function Home() {
         {/* Results */}
         {result && (
           <div className="space-y-4 animate-in fade-in duration-500">
+            {/* Source indicator */}
+            {fileName && (
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                </svg>
+                Scored from: {fileName}
+              </div>
+            )}
+
             {/* Overall Score Card */}
             <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-xl">
               <div className="flex items-center gap-6">
@@ -244,7 +453,6 @@ export default function Home() {
                   key={i}
                   className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
                 >
-                  {/* Score bar at top of card */}
                   <ScoreBar score={dim.score} grade={dim.grade} />
 
                   <div className="p-5">
@@ -265,7 +473,6 @@ export default function Home() {
 
                     <p className="text-sm text-zinc-300 leading-relaxed">{dim.explanation}</p>
 
-                    {/* Expandable remediation */}
                     <button
                       onClick={() => toggleRemediation(i)}
                       className="mt-3 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
@@ -294,11 +501,7 @@ export default function Home() {
             {/* Score again */}
             <div className="pt-2 text-center">
               <button
-                onClick={() => {
-                  setResult(null);
-                  setDocument("");
-                  setShowRemediation({});
-                }}
+                onClick={handleReset}
                 className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 Score another document
